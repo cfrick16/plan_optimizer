@@ -3,6 +3,8 @@ from typing import Dict, List
 from collections import defaultdict
 from models import IntervalDataPoint
 from services.date_time_helper import is_time_in_range
+from pydantic import BaseModel
+
 
 '''
     Calculate the average rate for a given interval. 
@@ -13,6 +15,7 @@ from services.date_time_helper import is_time_in_range
     - kwh_usage_rates never overlap within the tariff config.
     - kwh_usage_rates reset every month. (not clear from the requirements, but seems reasonable)
     - If there is a valid time and kwh useage rate override, the lower rate is applied.
+    - Energy generated is added after the consumed energy is used for each interval.
 '''
 def get_rate_for_interval(interval: IntervalDataPoint, total_wh_usage: float, tariff_config: TariffConfig, wh_to_buy: float) -> float:
     # 1. Initialize total rate and watt hours touched
@@ -44,7 +47,11 @@ def get_rate_for_interval(interval: IntervalDataPoint, total_wh_usage: float, ta
     total_rate += (wh_to_buy - wh_covered) * base_rate
     return total_rate / interval.duration
 
-def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: TariffConfig, rollover_wh: float) -> float:
+class MonthlyCostResult(BaseModel):
+    month_cost: float
+    rollover_wh: float
+
+def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: TariffConfig, rollover_wh: float) -> MonthlyCostResult:
     # 1. Add monthly fee 
     total_cost = tariff_config.monthly_fee
     current_rollover_wh = rollover_wh
@@ -55,12 +62,18 @@ def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: Tar
         # 3. Use any leftover rollover_wh before calculating the cost for the interval
         wh_to_buy = max(interval.consumption - current_rollover_wh, 0)
         current_rollover_wh = max(current_rollover_wh - wh_to_buy, 0)
+        
+        # 4. Add the generation to the rollover_wh
+        current_rollover_wh += interval.generation
 
-        # 4. Calculate the cost for the interval
+        # 5. Calculate the cost for the interval
         total_cost += wh_to_buy / 1000 * get_rate_for_interval(interval, total_wh_usage, tariff_config, wh_to_buy)
         total_wh_usage += wh_to_buy
 
-    return total_cost
+    return MonthlyCostResult(
+        month_cost=total_cost,
+        rollover_wh=current_rollover_wh
+    )
 
 '''
     Calculate the average annual cost for a given tariff config and a given list of interval data.
@@ -81,8 +94,13 @@ def calculate_plan_cost_evaluations(
 
 
     # 2. Calculate total cost for each month
-    total_cost = sum(map(lambda x: get_total_cost_for_month(x, tariff_config, 0), interval_data_by_month.values()))
-
+    rollover_wh = 0
+    total_cost = 0
+    for inteval_data_month in interval_data_by_month.values():
+        monthly_result = get_total_cost_for_month(inteval_data_month, tariff_config, rollover_wh)
+        total_cost += monthly_result.month_cost
+        rollover_wh = monthly_result.rollover_wh
+    
     # 3. Calculate average annual cost. Round to the nearest penny.
     num_years = len(interval_data_by_month) / 12
     avg_annual_cost = total_cost / num_years

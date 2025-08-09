@@ -2,31 +2,44 @@ from models import IntervalDataList, TariffConfig, PlanCostEvaluation
 from typing import Dict, List
 from collections import defaultdict
 from models import IntervalDataPoint
+from services.date_time_helper import is_time_in_range
 
 '''
     Calculate the average rate for a given interval. 
     ex) if 2 minutes were charged at .1 and the final 1 minute was charged at .2, this would return .133
 
     Assumptions:
+    - Time based rate overrides are applied the same for the entire entry interval based on the start time since it's impossible to know the exact time of the day.
     - kwh_usage_rates never overlap within the tariff config.
     - kwh_usage_rates reset every month. (not clear from the requirements, but seems reasonable)
+    - If there is a valid time and kwh useage rate override, the lower rate is applied.
 '''
 def get_rate_for_interval(interval: IntervalDataPoint, wh_usage: float, tariff_config: TariffConfig) -> float:
     # 1. Initialize total rate and minutes touched
     total_rate = 0
     minutes_touched = 0
+    time_based_rate = None
 
-    # 2. Iterate over the kwh usage rate overrides, sum the rates for each minute and keep track of the number of minutes touched
+    # 2. Find any time based rate overrides that apply to this interval
+    time_based_rate_overrides = []
+    for time_based_rate_override in tariff_config.time_based_rate_overrides:
+        if is_time_in_range(interval.datetime, time_based_rate_override.start_time, time_based_rate_override.end_time):
+            time_based_rate = time_based_rate_override.rate
+
+    # 3. Iterate over the kwh usage rate overrides, sum the rates for each minute and keep track of the number of minutes touched
     for kwh_usage_rate_override in tariff_config.kwh_usage_rate_overrides:
         override_min_wh = kwh_usage_rate_override.min_kwh * 1000
         override_max_wh = kwh_usage_rate_override.max_kwh * 1000
         if override_min_wh <= wh_usage <= override_max_wh:
-            minutes_within_this_interval = min(interval.duration, override_max_wh - wh_usage)
-            total_rate += kwh_usage_rate_override.rate * minutes_within_this_interval
-            minutes_touched += minutes_within_this_interval
+            # Ignore the kwh useage rate override if the time based rate is lower
+            if time_based_rate is None or time_based_rate > kwh_usage_rate_override.rate:
+                minutes_within_this_interval = min(interval.duration, override_max_wh - wh_usage)
+                total_rate += kwh_usage_rate_override.rate * minutes_within_this_interval
+                minutes_touched += minutes_within_this_interval
 
+    base_rate = time_based_rate if time_based_rate is not None else tariff_config.base_rate
     # 3. Add the base rate for the remaining minutes
-    total_rate += (interval.duration - minutes_touched) * tariff_config.base_rate
+    total_rate += (interval.duration - minutes_touched) * base_rate
     return total_rate / interval.duration
 
 def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: TariffConfig) -> float:

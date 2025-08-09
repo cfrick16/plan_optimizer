@@ -1,15 +1,22 @@
 import pandas as pd
+import json
 from io import StringIO
 from fastapi import UploadFile
-from typing import List
-from models import IntervalDataPoint
+from models import IntervalDataList, TariffConfigList, TariffConfig
 
 
-async def parse_csv_file(file: UploadFile) -> List[IntervalDataPoint]:
-    """Parse CSV from UploadFile - maximum speed optimizations"""
+async def parse_json_tariff_config() -> TariffConfigList:
+    # From a file
+    with open('tariff_config.json', 'r') as f:
+        data = json.load(f)
+
+
+    return  data['tariffs']
+
+
+async def parse_csv_interval_data(file: UploadFile) -> IntervalDataList:
     contents = (await file.read()).decode("utf-8")
 
-    # Ultra-fast pandas options
     df = pd.read_csv(
         StringIO(contents),
         dtype={
@@ -21,5 +28,4 @@ async def parse_csv_file(file: UploadFile) -> List[IntervalDataPoint]:
         },
     )
 
-    # Use faster orient='records' directly
     return df.to_dict("records")

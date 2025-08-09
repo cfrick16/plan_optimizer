@@ -1,0 +1,36 @@
+{
+    "tariffs": [
+        {
+            "id": 1,
+            "name": "Flat",
+            "monthly_fee": 0,
+            "base_rate": 0.15
+        },
+        {
+            "id": 2,
+            "name": "Tiered",
+            "monthly_fee": 4.95,
+            "base_rate": 0.17,
+            "kwh_usage_rate_overrides": [
+                {
+                    "min_kwh": 0,
+                    "max_kwh": 500,
+                    "rate": 0.11
+                }
+            ]
+        },
+        {
+            "id": 3,
+            "name": "Free Nights",
+            "monthly_fee": 9.95,
+            "base_rate": 0.19,
+            "time_based_rate_overrides": [
+                {
+                    "start_time": "22:00",
+                    "end_time": "06:00",
+                    "rate": 0.0
+                }
+            ]
+        }
+    ]
+}

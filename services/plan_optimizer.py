@@ -5,6 +5,8 @@ from models import IntervalDataPoint
 from services.date_time_helper import is_time_in_range
 from pydantic import BaseModel
 
+# Maximum storage capacity in watt hours that generated energy can be stored in.
+MAX_STORAGE_WH = 3_000
 
 '''
     Calculate the average rate for a given interval. 
@@ -15,7 +17,7 @@ from pydantic import BaseModel
     - kwh_usage_rates never overlap within the tariff config.
     - kwh_usage_rates reset every month. (not clear from the requirements, but seems reasonable)
     - If there is a valid time and kwh useage rate override, the lower rate is applied.
-    - Energy generated is added after the consumed energy is used for each interval.
+    - Energy generated is added after the consumed energy is used for each
 '''
 def get_rate_for_interval(interval: IntervalDataPoint, total_wh_usage: float, tariff_config: TariffConfig, wh_to_buy: float) -> float:
     # 1. Initialize total rate and watt hours touched
@@ -65,6 +67,7 @@ def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: Tar
         
         # 4. Add the generation to the rollover_wh
         current_rollover_wh += interval.generation
+        current_rollover_wh = min(current_rollover_wh, MAX_STORAGE_WH)
 
         # 5. Calculate the cost for the interval
         total_cost += wh_to_buy / 1000 * get_rate_for_interval(interval, total_wh_usage, tariff_config, wh_to_buy)

@@ -50,7 +50,8 @@ def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: Tar
     wh_usage = 0
     for interval in interval_data:
         # 3. Calculate the cost for the interval
-        total_cost += interval.consumption * get_rate_for_interval(interval, wh_usage, tariff_config)
+        consumption_kwh = interval.consumption / 1000
+        total_cost += consumption_kwh * get_rate_for_interval(interval, wh_usage, tariff_config)
         wh_usage += interval.consumption
 
     return total_cost
@@ -77,12 +78,13 @@ def calculate_plan_cost_evaluations(
     total_cost = sum(map(lambda x: get_total_cost_for_month(x, tariff_config), interval_data_by_month.values()))
 
     # 3. Calculate average annual cost. Round to the nearest penny.
-    num_years = len(interval_data) / 12
+    num_years = len(interval_data_by_month) / 12
     avg_annual_cost = total_cost / num_years
     avg_annual_cost = round(avg_annual_cost, 2)
 
     return PlanCostEvaluation(
         tariff_config_id=tariff_config.id,
         tarrif_config_name=tariff_config.name,
-        avg_annual_cost=avg_annual_cost
+        avg_annual_cost=avg_annual_cost,
+        total_cost=total_cost
     )

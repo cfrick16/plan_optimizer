@@ -8,7 +8,7 @@ class PlanCostEvaluation(BaseModel):
     # Ideally we would just pass the id of the tariff, but using name as well for now 
     tarrif_config_name: str
     avg_annual_cost: float
-
+    total_cost: float
 RecommendPlanResult = List[PlanCostEvaluation]
 
 # Model for the interval data csvs

@@ -14,10 +14,10 @@ from services.date_time_helper import is_time_in_range
     - kwh_usage_rates reset every month. (not clear from the requirements, but seems reasonable)
     - If there is a valid time and kwh useage rate override, the lower rate is applied.
 '''
-def get_rate_for_interval(interval: IntervalDataPoint, wh_usage: float, tariff_config: TariffConfig) -> float:
-    # 1. Initialize total rate and minutes touched
+def get_rate_for_interval(interval: IntervalDataPoint, total_wh_usage: float, tariff_config: TariffConfig, wh_to_buy: float) -> float:
+    # 1. Initialize total rate and watt hours touched
     total_rate = 0
-    minutes_touched = 0
+    wh_covered = 0
     time_based_rate = None
 
     # 2. Find any time based rate overrides that apply to this interval
@@ -30,29 +30,35 @@ def get_rate_for_interval(interval: IntervalDataPoint, wh_usage: float, tariff_c
     for kwh_usage_rate_override in tariff_config.kwh_usage_rate_overrides:
         override_min_wh = kwh_usage_rate_override.min_kwh * 1000
         override_max_wh = kwh_usage_rate_override.max_kwh * 1000
-        if override_min_wh <= wh_usage <= override_max_wh:
+        if override_min_wh <= total_wh_usage <= override_max_wh:
             # Ignore the kwh useage rate override if the time based rate is lower
             if time_based_rate is None or time_based_rate > kwh_usage_rate_override.rate:
-                minutes_within_this_interval = min(interval.duration, override_max_wh - wh_usage)
-                total_rate += kwh_usage_rate_override.rate * minutes_within_this_interval
-                minutes_touched += minutes_within_this_interval
+                wh_within_this_interval = min(wh_to_buy, override_max_wh - total_wh_usage)
+                total_rate += kwh_usage_rate_override.rate * wh_within_this_interval
+                wh_covered += wh_within_this_interval
 
+    # 4. Determine what the rate should be for the remaining watt hours
     base_rate = time_based_rate if time_based_rate is not None else tariff_config.base_rate
-    # 3. Add the base rate for the remaining minutes
-    total_rate += (interval.duration - minutes_touched) * base_rate
+
+    # 5. Add the base rate for the remaining whs used
+    total_rate += (wh_to_buy - wh_covered) * base_rate
     return total_rate / interval.duration
 
-def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: TariffConfig) -> float:
+def get_total_cost_for_month(interval_data: IntervalDataList, tariff_config: TariffConfig, rollover_wh: float) -> float:
     # 1. Add monthly fee 
     total_cost = tariff_config.monthly_fee
+    current_rollover_wh = rollover_wh
 
     # 2. Iterate over the interval data
-    wh_usage = 0
+    total_wh_usage = 0
     for interval in interval_data:
-        # 3. Calculate the cost for the interval
-        consumption_kwh = interval.consumption / 1000
-        total_cost += consumption_kwh * get_rate_for_interval(interval, wh_usage, tariff_config)
-        wh_usage += interval.consumption
+        # 3. Use any leftover rollover_wh before calculating the cost for the interval
+        wh_to_buy = max(interval.consumption - current_rollover_wh, 0)
+        current_rollover_wh = max(current_rollover_wh - wh_to_buy, 0)
+
+        # 4. Calculate the cost for the interval
+        total_cost += wh_to_buy / 1000 * get_rate_for_interval(interval, total_wh_usage, tariff_config, wh_to_buy)
+        total_wh_usage += wh_to_buy
 
     return total_cost
 
@@ -75,7 +81,7 @@ def calculate_plan_cost_evaluations(
 
 
     # 2. Calculate total cost for each month
-    total_cost = sum(map(lambda x: get_total_cost_for_month(x, tariff_config), interval_data_by_month.values()))
+    total_cost = sum(map(lambda x: get_total_cost_for_month(x, tariff_config, 0), interval_data_by_month.values()))
 
     # 3. Calculate average annual cost. Round to the nearest penny.
     num_years = len(interval_data_by_month) / 12
